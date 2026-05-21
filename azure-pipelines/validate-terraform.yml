@@ -1,0 +1,36 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - feature/*
+  paths:
+    include:
+      - terraform/*
+    exclude:
+      - azure-pipelines
+      - .gitignore
+
+name: "Validate_Terraform_$(Build.BuildId)"
+
+pool:
+  name: "DevOps-AzurePipelines-Ubuntu2204"
+
+resources:
+  repositories:
+    - repository: templates
+      name: CICD_Pipelines/pipeline-templates
+      type: git
+      ref: "refs/tags/iac-v0.0.11"
+
+variables:
+  - name: pathToFiles
+    value: terraform/modules
+  
+
+extends:
+  template: templates/infrastructure/validate/extends/extends-terraform-validate-component.yml@templates
+  parameters:
+    pathToTerraform: $(pathToFiles)
+    serviceConnection: 'sc-sandbox-devops-001-wif-IaC'
+    tfvarsFile: 'environments/variables.integration_test.tfvars'
+    enableTerraformTest: true

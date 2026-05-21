@@ -1,0 +1,41 @@
+trigger: none
+
+pool:
+  name: DevOps-AzurePipelines-Ubuntu2204
+
+steps:
+  - bash: |
+      echo "The source branch is: $(System.PullRequest.SourceBranch)"
+      echo "The target branch is: $(System.PullRequest.TargetBranch)"
+      echo
+    displayName: "Printing source and target branches of PR"
+
+  - script: |
+      post_status() {
+          local message=$1
+          curl -u :$(System.AccessToken) \
+              -X POST \
+              -H "Content-Type: application/json" \
+              -d "{
+                    \"state\": \"failed\",
+                    \"description\": \"$message\",
+                    \"context\": {
+                        \"name\": \"Custom Check\",
+                        \"genre\": \"continuous-integration\"
+                    }
+                  }" \
+              $(System.CollectionUri)$(System.TeamProject)/_apis/git/repositories/$(Build.Repository.Name)/pullRequests/$(System.PullRequest.PullRequestId)/statuses?api-version=6.0-preview.1
+      }
+
+      if [[ "$(System.PullRequest.SourceBranch)" != refs/heads/feature/* && "$(System.PullRequest.TargetBranch)" == refs/heads/develop ]]; then
+        echo "##vso[task.logissue type=error]Only feature branches should be merged to develop."
+        post_status "Only feature branches can be merged to develop."
+        exit 1
+      fi
+
+      if [[ "$(System.PullRequest.SourceBranch)" != refs/heads/develop && "$(System.PullRequest.TargetBranch)" == refs/heads/main ]]; then
+        echo "##vso[task.logissue type=error]Only develop branch can merge directly to main."
+        post_status "Only develop branch can merge directly to main."
+        exit 1
+      fi
+    displayName: 'Validate merge flow'

@@ -1,0 +1,105 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - main
+      - feature/*
+  paths:
+    include:
+      - terraform/*
+    exclude:
+      - azure-pipelines
+      - .gitignore
+      - terraform/modules-version.yml
+
+pool:
+  name: "DevOps-AzurePipelines-Ubuntu2204"
+
+variables:
+  # Pipeline Evaluations
+  isMain: $[ eq(variables['Build.SourceBranch'], 'refs/heads/main') ]
+  isDevelop: $[ eq(variables['Build.SourceBranch'], 'refs/heads/develop') ]
+  isPR: $[ eq(variables['Build.Reason'], 'PullRequest') ]
+  packageName: 'vystar-terraform'
+  folderToPackage: '$(Build.SourcesDirectory)/terraform/modules'
+  packageVersionOption: 'patch'
+  newVersion: ''
+
+stages:
+- stage: createPkg
+  displayName: 'Package Terraform Modules'
+  jobs:
+    - job: createZip
+      displayName: 'Create Zip'
+      steps:
+        - checkout: self
+          clean: true
+          persistCredentials: true
+        - script: |
+            git config --global user.email "adopipeline@vystarcu.org"
+            git config --global user.name "ADOPipeline"
+          displayName: 'Config Git User'
+        - script: |
+            echo "##vso[task.setvariable variable=packageVersionOption;]major"
+          condition: eq(variables['isMain'], 'True')
+          displayName: Set Package Versions Options to Major
+        - script: |
+            echo "##vso[task.setvariable variable=packageVersionOption;]minor"
+          condition: eq(variables['isDevelop'], 'True')
+          displayName: Set Package Versions Options to Minor
+        - script: |
+            echo
+            echo $PACKAGEVERSIONOPTION
+            echo
+            echo
+            printenv
+          displayName: 'Debug Output Variables'
+        - task: ArchiveFiles@2
+          displayName: "Creating $(packageName).zip"
+          inputs:
+            rootFolderOrFile: '$(folderToPackage)'
+            includeRootFolder: true
+            archiveType: 'zip'
+            archiveFile: '$(Build.ArtifactStagingDirectory)/$(packageName).zip'
+            replaceExistingArchive: true
+            verbose: true
+        - task: PublishPipelineArtifact@1
+          displayName: 'Publish Zip to Pipeline'
+          inputs:
+            targetPath: '$(Build.ArtifactStagingDirectory)/$(packageName).zip'
+            artifact: 'modules'
+            publishLocation: 'pipeline'
+        - task: UniversalPackages@0
+          displayName: Publish zip To Feed
+          inputs:
+            command: 'publish'
+            publishDirectory: '$(Build.ArtifactStagingDirectory)'
+            feedsToUsePublish: 'internal'
+            vstsFeedPublish: '8ad78911-005f-4f34-901d-761b5592d9fa/114d211b-791b-4a6a-b437-f67bd98fd698'
+            vstsFeedPackagePublish: '$(packageName)'
+            versionOption: '$(packageVersionOption)'
+            packagePublishDescription: 'Custom Vystar Terraform Modules'
+            verbosity: 'Information'
+            publishedPackageVar: 'publishedPackageInfo'
+        - script: |
+            echo $(publishedPackageInfo)
+            string="$(publishedPackageInfo)"
+            last_word=$(echo $string | rev | cut -d' ' -f1 | rev)
+            echo "##vso[task.setvariable variable=newVersion;]$last_word"
+          workingDirectory: $(System.DefaultWorkingDirectory)
+          displayName: Display Package Information
+        - script: |
+            cat modules-version.yml
+            echo "version: $(newVersion)" > ./terraform/modules-version.yml
+            cat modules-version.yml
+            git add -A
+            git commit -m "Update modules-version.yml [skip ci]"
+            echo $BUILD_SOURCEBRANCH
+            branchName=$(echo "$BUILD_SOURCEBRANCH" | sed 's/refs\/heads\///')
+            echo $branchName
+            git push origin "HEAD:$branchName"
+            git tag -a $(newVersion) -m "Add Tag with Version based on publish feed"
+            git push --tags
+          workingDirectory: $(Build.SourcesDirectory)
+          displayName: 'Git Commit and Tag from Pipeline'
+          continueOnError: true
